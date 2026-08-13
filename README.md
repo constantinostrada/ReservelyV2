@@ -77,6 +77,20 @@ A guest's standing is read as of **today**, when the booking is taken, not as
 of the date being booked: the deposit is a condition of booking now, and the
 counting window can't be read from a date that hasn't happened yet.
 
+The confirmation says what the deposit was and why:
+
+    { "reservationId": "res_08",
+      "deposit": { "taken": true, "amount": "€60.00",
+                   "reason": "2 no-shows in the 6 months to July 2026",
+                   "summary": "Deposit of €60.00 taken — 2 no-shows in the 6 months to July 2026." },
+      "book": { ... } }
+
+A booking that owed nothing gets `{ "taken": false, "summary": "No deposit was
+taken — this booking didn't require one." }`. It is stated rather than left out:
+a missing line reads as an oversight, and a guest charged nothing should see
+that said as plainly as one who was charged. The wording comes from the API,
+like every other verdict it sends.
+
 What was collected is stored on the reservation in minor units
 (`depositTakenMinor`) and formatted only on the way out. It is a record of what
 happened, not something re-derived later — the rule's answer moves as the

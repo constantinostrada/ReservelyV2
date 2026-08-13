@@ -15,8 +15,17 @@ export type DepositRefusal =
   | "deposit_short"
   | "deposit_not_required";
 
+/**
+ * A deposit the booking actually collected.
+ *
+ * The reason travels with the sum rather than being looked up again later: it
+ * is why *this* money was taken, and the rule's answer moves on as the counting
+ * window turns over.
+ */
+export type TakenDeposit = { deposit: Money; reason: string };
+
 export type DepositCheck =
-  | { ok: true; taken: Money | null }
+  | { ok: true; taken: TakenDeposit | null }
   | {
       ok: false;
       /** Machine-readable so callers can branch without matching on prose. */
@@ -75,5 +84,41 @@ export function checkDeposit(
     };
   }
 
-  return { ok: true, taken: deposit };
+  return { ok: true, taken: { deposit, reason } };
+}
+
+/**
+ * What the guest is told about the deposit on their confirmation.
+ *
+ * Both arms carry a `summary`, because a booking that took nothing has to say
+ * so: silence reads as an omission, and a guest who was charged nothing should
+ * see that stated as plainly as one who was charged.
+ *
+ * Worded here, priced here. Like every other verdict this API sends, the
+ * confirmation arrives written the way it should be shown — the amount already
+ * formatted, minor units left behind — so no client has to word the rule's
+ * result for itself.
+ */
+export type DepositConfirmation =
+  | { taken: false; summary: string }
+  | { taken: true; amount: string; reason: string; summary: string };
+
+/**
+ * The deposit line on a booking confirmation.
+ *
+ * Built from what was actually collected, not from the rule read afresh: the
+ * confirmation is a receipt for a booking that has been taken, and it should
+ * still say the same thing when the counting window has moved on.
+ */
+export function confirmDeposit(taken: TakenDeposit | null): DepositConfirmation {
+  if (taken === null) {
+    return { taken: false, summary: "No deposit was taken — this booking didn't require one." };
+  }
+
+  return {
+    taken: true,
+    amount: taken.deposit.amount,
+    reason: taken.reason,
+    summary: `Deposit of ${taken.deposit.amount} taken — ${taken.reason}.`,
+  };
 }

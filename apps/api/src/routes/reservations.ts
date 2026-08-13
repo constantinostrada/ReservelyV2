@@ -7,7 +7,7 @@ import {
   listReservations,
   recordNoShow,
 } from "../data/book.js";
-import { checkDeposit } from "../domain/booking.js";
+import { checkDeposit, confirmDeposit } from "../domain/booking.js";
 import { checkNoShow, noShowFrom } from "../domain/no-show.js";
 import { buildDayBook, depositRequirement, today } from "../domain/reservations.js";
 import { parseBookingRequest } from "./booking-request.js";
@@ -55,6 +55,10 @@ reservationsRouter.get("/reservations", (req, res) => {
  * not as of the date being booked. The deposit is a condition of booking now,
  * and the counting window would otherwise be read from a date that hasn't
  * happened.
+ *
+ * The confirmation answers with the deposit line already worded: what was
+ * taken, and the standing that called for it — or, when nothing was taken, a
+ * line saying as much rather than no line at all.
  */
 reservationsRouter.post("/reservations", (req, res) => {
   const parsed = parseBookingRequest(req.body);
@@ -87,12 +91,12 @@ reservationsRouter.post("/reservations", (req, res) => {
     partySize,
     guestId,
     status: "booked",
-    depositTakenMinor: verdict.taken?.amountMinor ?? null,
+    depositTakenMinor: verdict.taken?.deposit.amountMinor ?? null,
   });
 
   res.status(201).json({
     reservationId: reservation.id,
-    depositTaken: verdict.taken,
+    deposit: confirmDeposit(verdict.taken),
     book: buildDayBook(listReservations(), guestsById(), reservation.date, new Date()),
   });
 });
