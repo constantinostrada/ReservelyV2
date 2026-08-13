@@ -54,6 +54,38 @@ The wording the API sends names the closing month for exactly this reason
 ("2 no-shows in the 6 months to July 2026"): "the last 6 months" would be a
 misleading way to describe a count that stops at the end of last month.
 
+## Booking
+
+`POST /reservations` takes a booking:
+
+    { "date": "2026-08-20", "time": "19:30", "table": "12",
+      "partySize": 4, "guestId": "gst_02",
+      "deposit": { "amountMinor": 6000 } }
+
+A guest at or over the no-show threshold must leave a deposit to book again.
+Below it, `deposit` is left out and nothing is asked for; offering one anyway
+is refused rather than ignored, so a caller that thinks it took money is never
+told the booking succeeded as though it hadn't.
+
+**The caller never sets the price.** `amountMinor` states what it *collected*,
+in minor units; the API works out what was owed from `DEPOSIT_RULE` and refuses
+anything that doesn't match. Refusals come back as `409` with a `reason` —
+`deposit_required`, `deposit_short`, or `deposit_not_required` — and the sum
+that should have been taken.
+
+A guest's standing is read as of **today**, when the booking is taken, not as
+of the date being booked: the deposit is a condition of booking now, and the
+counting window can't be read from a date that hasn't happened yet.
+
+What was collected is stored on the reservation in minor units
+(`depositTakenMinor`) and formatted only on the way out. It is a record of what
+happened, not something re-derived later — the rule's answer moves as the
+counting window turns over, and a sum already taken does not.
+
+The threshold and the rate live in `DEPOSIT_RULE` alone. The route holds no
+numbers: it asks `depositRequirement` what is owed — the same call behind the
+screen's warning — so the gate and the warning cannot drift apart.
+
 ## No-shows
 
 `POST /reservations/:id/no-show` records that a guest never arrived.

@@ -43,6 +43,16 @@ export type Reservation = {
   partySize: number;
   guestId: string;
   status: ReservationStatus;
+  /**
+   * What was actually collected when the booking was taken, in minor units,
+   * or `null` if the rule asked for nothing.
+   *
+   * Held as minor units and formatted only on the way out, so the stored
+   * figure never carries a currency's presentation with it. It is a record of
+   * what happened at booking, not a re-derivation: the rule's answer moves as
+   * the counting window turns over, and a sum already taken does not.
+   */
+  depositTakenMinor: number | null;
 };
 
 /**
@@ -115,7 +125,7 @@ export const DEPOSIT_RULE = {
   currency: "EUR",
 } as const;
 
-const money = new Intl.NumberFormat("en-IE", {
+const currency = new Intl.NumberFormat("en-IE", {
   style: "currency",
   currency: DEPOSIT_RULE.currency,
 });
@@ -169,26 +179,65 @@ function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
+/** A sum of money, in minor units and as it should be shown. */
+export type Money = { amountMinor: number; amount: string };
+
+/** Money from minor units, formatted the one way this project formats it. */
+export function money(amountMinor: number): Money {
+  return { amountMinor, amount: currency.format(amountMinor / 100) };
+}
+
 /**
- * Applies the deposit rule to one reservation.
- *
- * Returns everything the screen needs to render the verdict — including the
- * amount already formatted and the reason already worded — so that nothing
- * downstream has to know the rule to describe it. The reason names the month
- * the window closes on, because "the last 6 months" would now be a misleading
- * way to describe a count that stops at the end of last month.
+ * What the deposit rule demands of a guest — the full answer, minor units
+ * included, for the code that has to take the money.
  */
-export function assessDeposit(guest: Guest, partySize: number, asOf: string): Deposit {
+export type DepositRequirement =
+  | { required: false }
+  | { required: true; deposit: Money; reason: string };
+
+/**
+ * Applies the deposit rule to a party of `partySize` standing behind `guest`.
+ *
+ * The single place the rule is evaluated. Both the screen's warning and the
+ * gate on the booking flow come through here, so neither can drift from the
+ * other, and neither needs to know the threshold or the per-head rate.
+ *
+ * The reason names the month the window closes on, because "the last 6 months"
+ * would be a misleading way to describe a count that stops at the end of last
+ * month.
+ */
+export function depositRequirement(
+  guest: Guest,
+  partySize: number,
+  asOf: string
+): DepositRequirement {
   const window = countingWindow(asOf);
   const count = noShowsWithin(guest, window);
   if (count < DEPOSIT_RULE.noShowThreshold) return { required: false };
 
   return {
     required: true,
-    amount: money.format((partySize * DEPOSIT_RULE.perHeadMinor) / 100),
+    deposit: money(partySize * DEPOSIT_RULE.perHeadMinor),
     reason:
       `${plural(count, "no-show")} in the ` +
       `${plural(DEPOSIT_RULE.completedMonths, "month")} to ${window.endsWith}`,
+  };
+}
+
+/**
+ * The same verdict, projected to what the screen renders.
+ *
+ * Minor units are dropped on the way out: the client is given the amount
+ * already written the way it should appear and has no arithmetic left to do.
+ */
+export function assessDeposit(guest: Guest, partySize: number, asOf: string): Deposit {
+  const requirement = depositRequirement(guest, partySize, asOf);
+  if (!requirement.required) return { required: false };
+
+  return {
+    required: true,
+    amount: requirement.deposit.amount,
+    reason: requirement.reason,
   };
 }
 

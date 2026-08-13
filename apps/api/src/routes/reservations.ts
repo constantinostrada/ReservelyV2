@@ -1,13 +1,16 @@
 import { Router } from "express";
 import {
+  addReservation,
   findGuest,
   findReservation,
   guestsById,
   listReservations,
   recordNoShow,
 } from "../data/book.js";
+import { checkDeposit } from "../domain/booking.js";
 import { checkNoShow, noShowFrom } from "../domain/no-show.js";
-import { buildDayBook, today } from "../domain/reservations.js";
+import { buildDayBook, depositRequirement, today } from "../domain/reservations.js";
+import { parseBookingRequest } from "./booking-request.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -35,6 +38,63 @@ reservationsRouter.get("/reservations", (req, res) => {
 
   const date = requested ?? today();
   res.json(buildDayBook(listReservations(), guestsById(), date, new Date()));
+});
+
+/**
+ * POST /reservations
+ *
+ * Takes a booking, if the guest is allowed to make one.
+ *
+ * A guest over the no-show threshold must leave a deposit to book again. This
+ * route holds no numbers: it asks `depositRequirement` what the rule demands —
+ * the same call the screen's warning goes through — and `checkDeposit` whether
+ * the booking satisfies it. Changing the threshold or the per-head rate is a
+ * change to `DEPOSIT_RULE` and to nothing here.
+ *
+ * A guest's standing is read as of **today**, the moment the booking is taken,
+ * not as of the date being booked. The deposit is a condition of booking now,
+ * and the counting window would otherwise be read from a date that hasn't
+ * happened.
+ */
+reservationsRouter.post("/reservations", (req, res) => {
+  const parsed = parseBookingRequest(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.message });
+    return;
+  }
+  const { date, time, table, partySize, guestId, offeredMinor } = parsed.value;
+
+  const guest = findGuest(guestId);
+  if (guest === undefined) {
+    res.status(404).json({ error: `No guest ${guestId}.` });
+    return;
+  }
+
+  const verdict = checkDeposit(depositRequirement(guest, partySize, today()), offeredMinor);
+  if (!verdict.ok) {
+    res.status(409).json({
+      error: verdict.message,
+      reason: verdict.reason,
+      deposit: verdict.required,
+    });
+    return;
+  }
+
+  const reservation = addReservation({
+    date,
+    time,
+    table,
+    partySize,
+    guestId,
+    status: "booked",
+    depositTakenMinor: verdict.taken?.amountMinor ?? null,
+  });
+
+  res.status(201).json({
+    reservationId: reservation.id,
+    depositTaken: verdict.taken,
+    book: buildDayBook(listReservations(), guestsById(), reservation.date, new Date()),
+  });
 });
 
 /**

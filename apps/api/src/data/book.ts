@@ -98,21 +98,26 @@ const guests: Guest[] = [
   { id: "gst_07", name: "Léa Marchetti", noShows: [] },
 ];
 
+// `depositTakenMinor: null` throughout: these bookings were taken before the
+// rule was enforced at booking, so nothing was collected on any of them.
 const reservations: Reservation[] = [
   // Yesterday — every sitting has passed, so all of it can be marked.
-  { id: "res_y1", date: yesterday, time: "12:30", table: "5", partySize: 2, guestId: "gst_07", status: "booked" },
-  { id: "res_y2", date: yesterday, time: "19:30", table: "8", partySize: 4, guestId: "gst_06", status: "booked" },
-  { id: "res_y3", date: yesterday, time: "20:00", table: "11", partySize: 6, guestId: "gst_03", status: "booked" },
+  { id: "res_y1", date: yesterday, time: "12:30", table: "5", partySize: 2, guestId: "gst_07", status: "booked", depositTakenMinor: null },
+  { id: "res_y2", date: yesterday, time: "19:30", table: "8", partySize: 4, guestId: "gst_06", status: "booked", depositTakenMinor: null },
+  { id: "res_y3", date: yesterday, time: "20:00", table: "11", partySize: 6, guestId: "gst_03", status: "booked", depositTakenMinor: null },
 
   // Today — lunch has passed by any normal afternoon, dinner has not.
-  { id: "res_01", date: service, time: "12:30", table: "5", partySize: 2, guestId: "gst_01", status: "booked" },
-  { id: "res_02", date: service, time: "13:00", table: "6", partySize: 3, guestId: "gst_03", status: "booked" },
-  { id: "res_03", date: service, time: "18:30", table: "12", partySize: 4, guestId: "gst_02", status: "booked" },
-  { id: "res_04", date: service, time: "19:00", table: "7", partySize: 6, guestId: "gst_04", status: "booked" },
-  { id: "res_05", date: service, time: "19:45", table: "9", partySize: 8, guestId: "gst_05", status: "booked" },
-  { id: "res_06", date: service, time: "20:15", table: "3", partySize: 3, guestId: "gst_06", status: "booked" },
-  { id: "res_07", date: service, time: "21:00", table: "12", partySize: 5, guestId: "gst_07", status: "booked" },
+  { id: "res_01", date: service, time: "12:30", table: "5", partySize: 2, guestId: "gst_01", status: "booked", depositTakenMinor: null },
+  { id: "res_02", date: service, time: "13:00", table: "6", partySize: 3, guestId: "gst_03", status: "booked", depositTakenMinor: null },
+  { id: "res_03", date: service, time: "18:30", table: "12", partySize: 4, guestId: "gst_02", status: "booked", depositTakenMinor: null },
+  { id: "res_04", date: service, time: "19:00", table: "7", partySize: 6, guestId: "gst_04", status: "booked", depositTakenMinor: null },
+  { id: "res_05", date: service, time: "19:45", table: "9", partySize: 8, guestId: "gst_05", status: "booked", depositTakenMinor: null },
+  { id: "res_06", date: service, time: "20:15", table: "3", partySize: 3, guestId: "gst_06", status: "booked", depositTakenMinor: null },
+  { id: "res_07", date: service, time: "21:00", table: "12", partySize: 5, guestId: "gst_07", status: "booked", depositTakenMinor: null },
 ];
+
+/** Ids for bookings taken while the service is running, after the seed's. */
+let taken = 0;
 
 export function listReservations(): Reservation[] {
   return reservations;
@@ -128,6 +133,14 @@ export function guestsById(): ReadonlyMap<string, Guest> {
 
 export function findGuest(id: string): Guest | undefined {
   return guests.find((g) => g.id === id);
+}
+
+/** Adds a booking to the book and hands back the stored record. */
+export function addReservation(booking: Omit<Reservation, "id">): Reservation {
+  taken += 1;
+  const reservation: Reservation = { id: `res_b${taken}`, ...booking };
+  reservations.push(reservation);
+  return reservation;
 }
 
 /**
