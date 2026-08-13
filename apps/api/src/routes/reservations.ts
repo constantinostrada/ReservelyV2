@@ -16,13 +16,37 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const reservationsRouter: Router = Router();
 
+type Filter =
+  | { ok: true; table: string | null }
+  | { ok: false; message: string };
+
 /**
- * GET /reservations?date=YYYY-MM-DD
+ * The `table` query parameter: which table to narrow the book to, if any.
+ *
+ * An unrecognised table is not an error — it answers with an empty book. A
+ * table is only ever "unknown" for a given day, and the screen holds its filter
+ * while stepping between days, so a table that isn't in tonight's book is an
+ * ordinary thing to ask about rather than a mistake.
+ */
+function tableFilter(raw: unknown): Filter {
+  if (raw === undefined) return { ok: true, table: null };
+  if (typeof raw !== "string") return { ok: false, message: "table must be a single value" };
+  if (raw.trim() === "") return { ok: false, message: "table must not be empty" };
+  return { ok: true, table: raw };
+}
+
+/**
+ * GET /reservations?date=YYYY-MM-DD&table=12
  *
  * The day's book, in sitting order, with the deposit rule already applied to
  * every line. Defaults to today. The response is what the screen renders, as
  * it renders it — amounts formatted, reasons worded, totals counted — so no
  * client has to hold a copy of the rule to show its result.
+ *
+ * `table` narrows it to one table's sittings, and the same principle holds:
+ * the narrowing is done here, so the totals that come back describe the lines
+ * that come back. The book also carries the day's `tables`, which is the list
+ * the filter is built from — the screen never gathers it from the rows itself.
  */
 reservationsRouter.get("/reservations", (req, res) => {
   const requested = req.query.date;
@@ -36,8 +60,14 @@ reservationsRouter.get("/reservations", (req, res) => {
     return;
   }
 
+  const filter = tableFilter(req.query.table);
+  if (!filter.ok) {
+    res.status(400).json({ error: filter.message });
+    return;
+  }
+
   const date = requested ?? today();
-  res.json(buildDayBook(listReservations(), guestsById(), date, new Date()));
+  res.json(buildDayBook(listReservations(), guestsById(), date, new Date(), filter.table));
 });
 
 /**
@@ -113,8 +143,18 @@ reservationsRouter.post("/reservations", (req, res) => {
  * deposit threshold — so returning the rebuilt book keeps the screen
  * consistent in one round trip and keeps it out of the business of working out
  * what else the change touched.
+ *
+ * `?table=` says which book to send back: a screen narrowed to one table is
+ * answered with that table, not with the whole day it was reading a moment
+ * ago. The filter is a view the caller states, and the reply honours it.
  */
 reservationsRouter.post("/reservations/:id/no-show", (req, res) => {
+  const filter = tableFilter(req.query.table);
+  if (!filter.ok) {
+    res.status(400).json({ error: filter.message });
+    return;
+  }
+
   const reservation = findReservation(req.params.id);
   if (reservation === undefined) {
     res.status(404).json({ error: `No reservation ${req.params.id}.` });
@@ -135,5 +175,7 @@ reservationsRouter.post("/reservations/:id/no-show", (req, res) => {
 
   recordNoShow(reservation, guest, noShowFrom(reservation));
 
-  res.json(buildDayBook(listReservations(), guestsById(), reservation.date, new Date()));
+  res.json(
+    buildDayBook(listReservations(), guestsById(), reservation.date, new Date(), filter.table)
+  );
 });

@@ -54,6 +54,28 @@ The wording the API sends names the closing month for exactly this reason
 ("2 no-shows in the 6 months to July 2026"): "the last 6 months" would be a
 misleading way to describe a count that stops at the end of last month.
 
+## Following one table
+
+`GET /reservations?date=2026-08-13&table=12` narrows the book to a single
+table's sittings; leave `table` off for the whole day. Each book carries the
+day's `tables` — every table with a sitting that day — which is the list the
+screen's filter is built from, and echoes back the `table` it was narrowed to.
+
+The narrowing is done by the API, not by the screen, for the same reason
+everything else here is: the totals in `summary` then describe the lines that
+came with them. A screen that filtered its own rows would be showing one
+table's sittings under the whole day's counts.
+
+`tables` is always the whole day's, worked out before the filter is applied —
+it is the choice of what to filter *to*, so narrowing the book must not narrow
+it. The list survives stepping to a day the chosen table isn't sitting on,
+which answers with an empty book rather than an error: the filter is held
+across dates, and a table with nothing on it tonight is an ordinary question.
+
+Marking a no-show takes the filter too (`POST /reservations/:id/no-show?table=12`),
+so the rebuilt book that comes back is the one being read rather than the whole
+day the screen had narrowed away from.
+
 ## Booking
 
 `POST /reservations` takes a booking:

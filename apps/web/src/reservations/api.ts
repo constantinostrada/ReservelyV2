@@ -35,6 +35,15 @@ export type DayBook = {
   /** The days either side, so the screen steps through the book without date maths. */
   previousDate: string;
   nextDate: string;
+  /**
+   * The day's tables, for the filter to offer. Always the whole day's, even
+   * when the book below is narrowed to one of them — gathered by the API, not
+   * scraped out of the rows by the screen.
+   */
+  tables: string[];
+  /** The table this book is narrowed to, or `null` for the whole day. */
+  table: string | null;
+  /** Counts for the lines below — this table's, when narrowed to one. */
   summary: {
     reservations: number;
     covers: number;
@@ -58,10 +67,26 @@ async function errorFrom(response: Response, fallback: string): Promise<Error> {
   return new Error(`${fallback} (${response.status}).`);
 }
 
-/** Fetches the day's book. Omit `date` for today. */
-export async function fetchDayBook(date?: string): Promise<DayBook> {
-  const query = date ? `?date=${encodeURIComponent(date)}` : "";
-  const response = await fetch(`/api/reservations${query}`);
+/** Builds the query the book is read through. Both parts are optional. */
+function bookQuery(date: string | null, table: string | null): string {
+  const query = new URLSearchParams();
+  if (date !== null) query.set("date", date);
+  if (table !== null) query.set("table", table);
+  const written = query.toString();
+  return written === "" ? "" : `?${written}`;
+}
+
+/**
+ * Fetches the day's book. `date` null for today, `table` null for every table.
+ *
+ * The filtering is asked of the API rather than done here, so the totals and
+ * the deposit count that come back belong to the lines that come back.
+ */
+export async function fetchDayBook(
+  date: string | null = null,
+  table: string | null = null
+): Promise<DayBook> {
+  const response = await fetch(`/api/reservations${bookQuery(date, table)}`);
 
   if (!response.ok) throw await errorFrom(response, "The book couldn't be loaded");
 
@@ -74,11 +99,19 @@ export async function fetchDayBook(date?: string): Promise<DayBook> {
  * Returns the day's book as it stands afterwards — the guest's new history can
  * push another of their bookings over the deposit threshold, so the API sends
  * back the whole day rather than the one line that was marked.
+ *
+ * `table` is passed on so the book that comes back is the one being read: a
+ * screen filtered to a table stays filtered to it across the mark.
  */
-export async function markNoShow(reservationId: string): Promise<DayBook> {
-  const response = await fetch(`/api/reservations/${encodeURIComponent(reservationId)}/no-show`, {
-    method: "POST",
-  });
+export async function markNoShow(
+  reservationId: string,
+  table: string | null = null
+): Promise<DayBook> {
+  const query = bookQuery(null, table);
+  const response = await fetch(
+    `/api/reservations/${encodeURIComponent(reservationId)}/no-show${query}`,
+    { method: "POST" }
+  );
 
   if (!response.ok) throw await errorFrom(response, "The no-show couldn't be recorded");
 

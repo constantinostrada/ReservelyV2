@@ -63,7 +63,61 @@ const styles = {
     background: "#fff",
     cursor: "pointer",
   },
+  select: {
+    font: "inherit",
+    padding: "0.25rem 0.5rem",
+    borderRadius: "0.375rem",
+    border: "1px solid #d0d0d0",
+    background: "#fff",
+    cursor: "pointer",
+  },
 } satisfies Record<string, React.CSSProperties>;
+
+/** The value standing for "no filter" — `<option>` values can only be strings. */
+const ALL_TABLES = "";
+
+/**
+ * The table filter.
+ *
+ * The tables offered are the day's own, listed by the API; the screen doesn't
+ * gather them from the rows it happens to be showing, which would leave the
+ * list collapsing to one entry as soon as a table was picked.
+ */
+function TableFilter({
+  book,
+  onChange,
+}: {
+  book: DayBook;
+  onChange: (table: string | null) => void;
+}): React.JSX.Element | null {
+  if (book.tables.length === 0 && book.table === null) return null;
+
+  // The filter holds while stepping between days, so the table being shown may
+  // have no sittings on this one. It stays on the list regardless — dropping it
+  // would leave the control blank while plainly still filtering.
+  const offered =
+    book.table !== null && !book.tables.includes(book.table)
+      ? [book.table, ...book.tables]
+      : book.tables;
+
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+      <span style={{ ...styles.muted, fontSize: "0.875rem" }}>Table</span>
+      <select
+        style={styles.select}
+        value={book.table ?? ALL_TABLES}
+        onChange={(e) => onChange(e.target.value === ALL_TABLES ? null : e.target.value)}
+      >
+        <option value={ALL_TABLES}>All tables</option>
+        {offered.map((table) => (
+          <option key={table} value={table}>
+            {table}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 /**
  * The deposit flag.
@@ -162,7 +216,13 @@ function Book({
   onMark: (id: string) => void;
 }): React.JSX.Element {
   if (book.reservations.length === 0) {
-    return <p style={styles.muted}>Nothing in the book for this day.</p>;
+    return (
+      <p style={styles.muted}>
+        {book.table === null
+          ? "Nothing in the book for this day."
+          : `Nothing on table ${book.table} this day.`}
+      </p>
+    );
   }
 
   return (
@@ -218,6 +278,9 @@ function Book({
 export function ReservationsScreen(): React.JSX.Element {
   /** The day being viewed; `null` means "today", which the API resolves. */
   const [date, setDate] = useState<string | null>(null);
+  /** The table being watched; `null` is the whole day. Held apart from the
+   * date, so stepping days keeps the table and changing table keeps the day. */
+  const [table, setTable] = useState<string | null>(null);
   const [book, setBook] = useState<DayBook | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [marking, setMarking] = useState<string | null>(null);
@@ -227,7 +290,7 @@ export function ReservationsScreen(): React.JSX.Element {
     setBook(null);
     setError(null);
 
-    fetchDayBook(date ?? undefined)
+    fetchDayBook(date, table)
       .then((loaded) => live && setBook(loaded))
       .catch((cause: unknown) => {
         if (live) setError(messageFor(cause, "The book couldn't be loaded."));
@@ -236,37 +299,51 @@ export function ReservationsScreen(): React.JSX.Element {
     return () => {
       live = false;
     };
-  }, [date]);
+  }, [date, table]);
 
-  const onMark = useCallback((id: string) => {
-    setMarking(id);
-    setError(null);
+  const onMark = useCallback(
+    (id: string) => {
+      setMarking(id);
+      setError(null);
 
-    markNoShow(id)
-      // The API answers with the rebuilt day, so a guest who has just crossed
-      // the deposit threshold shows it on their other bookings straight away.
-      .then(setBook)
-      .catch((cause: unknown) => setError(messageFor(cause, "The no-show couldn't be recorded.")))
-      .finally(() => setMarking(null));
-  }, []);
+      // The filter goes with it, so what comes back is the book being read.
+      markNoShow(id, table)
+        // The API answers with the rebuilt day, so a guest who has just crossed
+        // the deposit threshold shows it on their other bookings straight away.
+        .then(setBook)
+        .catch((cause: unknown) => setError(messageFor(cause, "The no-show couldn't be recorded.")))
+        .finally(() => setMarking(null));
+    },
+    [table]
+  );
 
   return (
     <main style={styles.page}>
       <h1 style={{ margin: 0 }}>Reservations</h1>
 
       {book !== null && (
-        <p style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.75rem",
+            flexWrap: "wrap",
+            margin: "1rem 0",
+          }}
+        >
           <button type="button" style={styles.step} onClick={() => setDate(book.previousDate)}>
             ‹
           </button>
           <button type="button" style={styles.step} onClick={() => setDate(book.nextDate)}>
             ›
           </button>
+          <TableFilter book={book} onChange={setTable} />
           <span style={styles.muted}>
             {book.label} · {book.summary.reservations} reservations · {book.summary.covers} covers
             {book.summary.noShows > 0 && ` · ${book.summary.noShows} no-shows`}
+            {book.table !== null && ` · table ${book.table} only`}
           </span>
-        </p>
+        </div>
       )}
 
       {error !== null && <p style={styles.problem}>{error}</p>}

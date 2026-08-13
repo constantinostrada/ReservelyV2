@@ -90,6 +90,19 @@ export type DayBook = {
   /** The days either side, so stepping through the book needs no date maths. */
   previousDate: string;
   nextDate: string;
+  /**
+   * Every table with a sitting on this date, in the order the book runs them.
+   *
+   * The whole day's tables, worked out before any filter is applied — it is the
+   * choice of what to filter *to*, so narrowing the book must not narrow it.
+   */
+  tables: string[];
+  /** The table the book is narrowed to, or `null` for the whole day. */
+  table: string | null;
+  /**
+   * Counts of what the book below actually holds. Narrowed to a table, these
+   * are that table's numbers, so the totals never describe more than is shown.
+   */
   summary: {
     reservations: number;
     covers: number;
@@ -247,21 +260,40 @@ export function sittingTime(reservation: Reservation): Date {
 }
 
 /**
+ * How the floor orders its tables: "3" before "12", and "Bar 3" after both.
+ *
+ * Numeric collation, because table names are numbers often enough that plain
+ * string order would read as wrong — "11", "12", "3" is not how anyone says it.
+ */
+function byTable(a: string, b: string): number {
+  return a.localeCompare(b, "en", { numeric: true });
+}
+
+/**
  * Builds the day's book: the sitting order, each reservation already judged
  * against the deposit rule, and the totals the screen shows.
  *
  * `now` decides which sittings have already passed; it is a parameter rather
  * than a call to the clock so the book can be built for a known moment.
+ *
+ * `table` narrows the book to one table's sittings. The narrowing happens here
+ * rather than on the screen so that everything the book carries — the totals,
+ * the deposit count — describes the lines that are actually shown. The list of
+ * tables to choose from is taken from the whole day, before narrowing.
  */
 export function buildDayBook(
   reservations: Reservation[],
   guests: ReadonlyMap<string, Guest>,
   date: string,
-  now: Date
+  now: Date,
+  table: string | null = null
 ): DayBook {
-  const forTheDay = reservations
-    .filter((r) => r.date === date)
-    .sort((a, b) => a.time.localeCompare(b.time) || a.table.localeCompare(b.table))
+  const onTheDate = reservations.filter((r) => r.date === date);
+  const tables = [...new Set(onTheDate.map((r) => r.table))].sort(byTable);
+
+  const forTheDay = onTheDate
+    .filter((r) => table === null || r.table === table)
+    .sort((a, b) => a.time.localeCompare(b.time) || byTable(a.table, b.table))
     .map<BookedReservation>((r) => {
       const guest = guests.get(r.guestId);
       if (guest === undefined) {
@@ -285,6 +317,8 @@ export function buildDayBook(
     label: dayLabel.format(new Date(`${date}T00:00:00`)),
     previousDate: shiftDate(date, -1),
     nextDate: shiftDate(date, 1),
+    tables,
+    table,
     summary: {
       reservations: forTheDay.length,
       covers: forTheDay.reduce((n, r) => n + r.partySize, 0),
