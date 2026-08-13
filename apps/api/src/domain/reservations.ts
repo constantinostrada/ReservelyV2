@@ -98,9 +98,18 @@ export type DayBook = {
  * the single place to change when the real policy is settled.
  */
 export const DEPOSIT_RULE = {
-  /** No-shows within the lookback that trigger a deposit. */
+  /** No-shows within the counting window that trigger a deposit. */
   noShowThreshold: 2,
-  lookbackMonths: 6,
+  /**
+   * How many *completed* calendar months are counted.
+   *
+   * The month in progress is not one of them. Counting whole months means the
+   * window only moves when a month closes, so a guest's standing holds steady
+   * through a service instead of drifting by a day every day — but it also
+   * means a no-show recorded this month does not bear on the rule until the
+   * month is out.
+   */
+  completedMonths: 6,
   /** Charged per head, in minor units of `currency`. */
   perHeadMinor: 1500,
   currency: "EUR",
@@ -118,12 +127,46 @@ const dayLabel = new Intl.DateTimeFormat("en-IE", {
   year: "numeric",
 });
 
-/** Counts a guest's no-shows falling inside the rule's lookback window. */
-function recentNoShows(guest: Guest, asOf: string): number {
-  const cutoff = new Date(`${asOf}T00:00:00`);
-  cutoff.setMonth(cutoff.getMonth() - DEPOSIT_RULE.lookbackMonths);
-  const cutoffIso = toIsoDate(cutoff);
-  return guest.noShows.filter((n) => n.date >= cutoffIso && n.date <= asOf).length;
+const monthLabel = new Intl.DateTimeFormat("en-IE", { month: "long", year: "numeric" });
+
+/** The stretch of time the deposit rule counts over. */
+export type CountingWindow = {
+  /** First day of the earliest month counted, YYYY-MM-DD. */
+  from: string;
+  /** First day of the month in progress — the day after the window, so compare with `<`. */
+  until: string;
+  /** The last completed month, e.g. "July 2026". */
+  endsWith: string;
+};
+
+/**
+ * The last `DEPOSIT_RULE.completedMonths` calendar months to have finished,
+ * as of `asOf`.
+ *
+ * Whole months, so the window runs from the first of the earliest month up to
+ * the last day of the month before `asOf` — the month `asOf` falls in is still
+ * running and is left out entirely.
+ */
+export function countingWindow(asOf: string): CountingWindow {
+  const d = new Date(`${asOf}T00:00:00`);
+  const year = d.getFullYear();
+  const month = d.getMonth();
+
+  return {
+    from: toIsoDate(new Date(year, month - DEPOSIT_RULE.completedMonths, 1)),
+    until: toIsoDate(new Date(year, month, 1)),
+    endsWith: monthLabel.format(new Date(year, month - 1, 1)),
+  };
+}
+
+/** Counts a guest's no-shows falling inside the counting window. */
+function noShowsWithin(guest: Guest, window: CountingWindow): number {
+  return guest.noShows.filter((n) => n.date >= window.from && n.date < window.until).length;
+}
+
+/** "1 month", "6 months". */
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 /**
@@ -131,16 +174,21 @@ function recentNoShows(guest: Guest, asOf: string): number {
  *
  * Returns everything the screen needs to render the verdict — including the
  * amount already formatted and the reason already worded — so that nothing
- * downstream has to know the rule to describe it.
+ * downstream has to know the rule to describe it. The reason names the month
+ * the window closes on, because "the last 6 months" would now be a misleading
+ * way to describe a count that stops at the end of last month.
  */
 export function assessDeposit(guest: Guest, partySize: number, asOf: string): Deposit {
-  const count = recentNoShows(guest, asOf);
+  const window = countingWindow(asOf);
+  const count = noShowsWithin(guest, window);
   if (count < DEPOSIT_RULE.noShowThreshold) return { required: false };
 
   return {
     required: true,
     amount: money.format((partySize * DEPOSIT_RULE.perHeadMinor) / 100),
-    reason: `${count} no-show${count === 1 ? "" : "s"} in the last ${DEPOSIT_RULE.lookbackMonths} months`,
+    reason:
+      `${plural(count, "no-show")} in the ` +
+      `${plural(DEPOSIT_RULE.completedMonths, "month")} to ${window.endsWith}`,
   };
 }
 

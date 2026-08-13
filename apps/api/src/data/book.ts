@@ -18,7 +18,7 @@ import {
  * one copy of their history to write to.
  *
  * Seeded against the current date so the day's book is never empty, and so the
- * deposit rule's lookback window is exercised by real dates rather than by
+ * deposit rule's counting window is exercised by real dates rather than by
  * fixtures that quietly age out.
  */
 
@@ -33,6 +33,26 @@ const service = today();
 const yesterday = daysAgo(1);
 
 /**
+ * A date in the middle of the calendar month `months` before this one.
+ *
+ * The no-show history is pinned to months rather than to a number of days
+ * back, because the deposit rule counts whole completed months: a fixture
+ * written as "40 days ago" lands in last month or the month before depending
+ * on when it's read, and the case it was meant to illustrate changes with it.
+ * Mid-month keeps it clear of both edges.
+ */
+function monthsAgo(months: number): string {
+  const now = new Date();
+  return toIsoDate(new Date(now.getFullYear(), now.getMonth() - months, 15));
+}
+
+/** The first of the current, still-running month — inside no completed month. */
+function thisMonth(): string {
+  const now = new Date();
+  return toIsoDate(new Date(now.getFullYear(), now.getMonth(), 1));
+}
+
+/**
  * History predating the book we hold in memory, so the missed reservations it
  * refers to aren't in `reservations` below.
  */
@@ -40,36 +60,40 @@ function archived(date: string, ref: string): NoShow {
   return { date, reservationId: `res_arc_${ref}` };
 }
 
+// With a 6-completed-month window, `monthsAgo(1)` through `monthsAgo(6)` are
+// counted, `monthsAgo(7)` and older are not, and `thisMonth()` is not yet.
 const guests: Guest[] = [
   { id: "gst_01", name: "Aoife Brennan", noShows: [] },
   {
     id: "gst_02",
     name: "Dara Whitfield",
-    // Two inside the lookback — already over the threshold.
-    noShows: [archived(daysAgo(38), "02a"), archived(daysAgo(96), "02b")],
+    // One at each edge of the window — both counted, so over the threshold.
+    noShows: [archived(monthsAgo(1), "02a"), archived(monthsAgo(6), "02b")],
   },
   {
     id: "gst_03",
     name: "Marcus Oyelaran",
-    // One recent, one long past — the old one falls outside the lookback.
-    noShows: [archived(daysAgo(52), "03a"), archived(daysAgo(410), "03b")],
+    // The second is one month past the window: counts 1, so no deposit.
+    noShows: [archived(monthsAgo(2), "03a"), archived(monthsAgo(7), "03b")],
   },
   { id: "gst_04", name: "Priya Raghunathan", noShows: [] },
   {
     id: "gst_05",
     name: "Tomas Lindqvist",
+    // Three on file, but this month's doesn't count yet — the other two do.
     noShows: [
-      archived(daysAgo(12), "05a"),
-      archived(daysAgo(64), "05b"),
-      archived(daysAgo(150), "05c"),
+      archived(thisMonth(), "05a"),
+      archived(monthsAgo(3), "05b"),
+      archived(monthsAgo(5), "05c"),
     ],
   },
   {
     id: "gst_06",
     name: "Hannah Okonkwo",
-    // One short of the threshold, and holding two bookings — marking the one
-    // she missed yesterday is what tips her tonight's table into a deposit.
-    noShows: [archived(daysAgo(40), "06a")],
+    // One short of the threshold, and holding two bookings. Marking the table
+    // she missed yesterday will not move her: yesterday falls in the running
+    // month, so it counts for nothing until the month closes.
+    noShows: [archived(monthsAgo(1), "06a")],
   },
   { id: "gst_07", name: "Léa Marchetti", noShows: [] },
 ];

@@ -24,14 +24,35 @@ reservations. The arrows step a day either way.
 ## The deposit rule
 
 A guest owes a deposit when they have **2 or more no-shows in the last 6
-months**; it's **€15 per head**. The rule lives in one place,
-`apps/api/src/domain/reservations.ts`, and the API applies it before answering:
-`GET /reservations` returns each line's verdict already decided, priced and
-worded. The client is never given a guest's no-show history, so it can't reach
-a different answer than the kitchen does.
+completed calendar months**; it's **€15 per head**. The rule lives in one
+place, `apps/api/src/domain/reservations.ts`, and the API applies it before
+answering: `GET /reservations` returns each line's verdict already decided,
+priced and worded. The client is never given a guest's no-show history, so it
+can't reach a different answer than the kitchen does.
 
 Those numbers are a placeholder — no real policy has been set yet. Changing
 them means changing `DEPOSIT_RULE` and nothing else.
+
+### Completed months, not a rolling window
+
+The months counted are whole ones that have **finished**. Read on any day in
+August 2026, the window is 1 February to 31 July: the same six months all
+month long. The month in progress is not counted at all.
+
+Two things follow, and they are the point of counting this way rather than
+back-dating six months from today:
+
+- A guest's standing holds steady through a service and through the month,
+  instead of shifting by a day every day. Two people looking at the book a
+  fortnight apart see the same verdict from the same history.
+- **A no-show recorded this month does not bear on the rule until the month is
+  out.** Mark a guest tonight and their deposit standing is unchanged; it
+  changes on the 1st. The record is kept either way — it is deferred, not
+  lost — but the deposit rule now lags the book by up to a month.
+
+The wording the API sends names the closing month for exactly this reason
+("2 no-shows in the 6 months to July 2026"): "the last 6 months" would be a
+misleading way to describe a count that stops at the end of last month.
 
 ## No-shows
 
