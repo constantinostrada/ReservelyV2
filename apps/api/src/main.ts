@@ -1,11 +1,12 @@
 import express from "express";
+import { reservationsRouter } from "./routes/reservations.js";
 
 /**
  * The service.
  *
- * Deliberately one file: how this is organised — layers, folders, where the
- * domain lives — is part of the work ahead, not something the skeleton should
- * settle in advance.
+ * Three layers so far: `domain` holds the rules, `data` holds the book, and
+ * `routes` exposes it. Rules never live in a route — the deposit rule in
+ * particular is decided in the domain and shipped to clients already applied.
  */
 const app = express();
 app.use(express.json());
@@ -14,6 +15,8 @@ app.use(express.json());
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "reservely-api" });
 });
+
+app.use(reservationsRouter);
 
 const port = Number(process.env.PORT ?? 3100);
 app.listen(port, () => {
