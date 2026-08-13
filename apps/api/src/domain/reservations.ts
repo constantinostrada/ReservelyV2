@@ -6,13 +6,31 @@
  * "does this guest owe a deposit" is answered.
  */
 
-/** A guest, and the history the deposit rule is drawn from. */
+/** One occasion a guest booked and never arrived. */
+export type NoShow = {
+  /** Service date of the reservation that was missed, YYYY-MM-DD. */
+  date: string;
+  /** The reservation it was recorded against. */
+  reservationId: string;
+};
+
+/**
+ * A guest.
+ *
+ * No-shows hang off the guest, not off the reservation they happened on — the
+ * restaurant's interest is in the person, and a guest who misses one booking
+ * is the same guest standing behind every other booking in their name. A
+ * reservation points at a guest by id so there is one record of that history
+ * rather than a copy per booking.
+ */
 export type Guest = {
   id: string;
   name: string;
-  /** Dates (YYYY-MM-DD) this guest booked and never arrived. */
-  noShows: string[];
+  noShows: NoShow[];
 };
+
+/** Whether the guest turned up. */
+export type ReservationStatus = "booked" | "no_show";
 
 export type Reservation = {
   id: string;
@@ -23,7 +41,8 @@ export type Reservation = {
   /** How the floor refers to the table, e.g. "12" or "Bar 3". */
   table: string;
   partySize: number;
-  guest: Guest;
+  guestId: string;
+  status: ReservationStatus;
 };
 
 /**
@@ -44,13 +63,29 @@ export type BookedReservation = {
   partySize: number;
   guest: { id: string; name: string };
   deposit: Deposit;
+  status: ReservationStatus;
+  /**
+   * Whether a no-show may be recorded against this line right now — decided
+   * here, so the screen never works out for itself whether a sitting has
+   * passed. It's a hint for rendering the control, not the safeguard: the
+   * clock moves on after the book is fetched, and the write path checks again.
+   */
+  canMarkNoShow: boolean;
 };
 
 export type DayBook = {
   date: string;
   /** The date as a person reads it, e.g. "Thursday 13 August 2026". */
   label: string;
-  summary: { reservations: number; covers: number; depositsRequired: number };
+  /** The days either side, so stepping through the book needs no date maths. */
+  previousDate: string;
+  nextDate: string;
+  summary: {
+    reservations: number;
+    covers: number;
+    depositsRequired: number;
+    noShows: number;
+  };
   reservations: BookedReservation[];
 };
 
@@ -88,7 +123,7 @@ function recentNoShows(guest: Guest, asOf: string): number {
   const cutoff = new Date(`${asOf}T00:00:00`);
   cutoff.setMonth(cutoff.getMonth() - DEPOSIT_RULE.lookbackMonths);
   const cutoffIso = toIsoDate(cutoff);
-  return guest.noShows.filter((d) => d >= cutoffIso && d <= asOf).length;
+  return guest.noShows.filter((n) => n.date >= cutoffIso && n.date <= asOf).length;
 }
 
 /**
@@ -98,11 +133,7 @@ function recentNoShows(guest: Guest, asOf: string): number {
  * amount already formatted and the reason already worded — so that nothing
  * downstream has to know the rule to describe it.
  */
-export function assessDeposit(
-  guest: Guest,
-  partySize: number,
-  asOf: string
-): Deposit {
+export function assessDeposit(guest: Guest, partySize: number, asOf: string): Deposit {
   const count = recentNoShows(guest, asOf);
   if (count < DEPOSIT_RULE.noShowThreshold) return { required: false };
 
@@ -113,33 +144,65 @@ export function assessDeposit(
   };
 }
 
+/** When a sitting is due, in the restaurant's own timezone. */
+export function sittingTime(reservation: Reservation): Date {
+  return new Date(`${reservation.date}T${reservation.time}:00`);
+}
+
 /**
  * Builds the day's book: the sitting order, each reservation already judged
  * against the deposit rule, and the totals the screen shows.
+ *
+ * `now` decides which sittings have already passed; it is a parameter rather
+ * than a call to the clock so the book can be built for a known moment.
  */
-export function buildDayBook(reservations: Reservation[], date: string): DayBook {
+export function buildDayBook(
+  reservations: Reservation[],
+  guests: ReadonlyMap<string, Guest>,
+  date: string,
+  now: Date
+): DayBook {
   const forTheDay = reservations
     .filter((r) => r.date === date)
     .sort((a, b) => a.time.localeCompare(b.time) || a.table.localeCompare(b.table))
-    .map<BookedReservation>((r) => ({
-      id: r.id,
-      time: r.time,
-      table: r.table,
-      partySize: r.partySize,
-      guest: { id: r.guest.id, name: r.guest.name },
-      deposit: assessDeposit(r.guest, r.partySize, date),
-    }));
+    .map<BookedReservation>((r) => {
+      const guest = guests.get(r.guestId);
+      if (guest === undefined) {
+        throw new Error(`reservation ${r.id} points at unknown guest ${r.guestId}`);
+      }
+
+      return {
+        id: r.id,
+        time: r.time,
+        table: r.table,
+        partySize: r.partySize,
+        guest: { id: guest.id, name: guest.name },
+        deposit: assessDeposit(guest, r.partySize, date),
+        status: r.status,
+        canMarkNoShow: r.status === "booked" && sittingTime(r) <= now,
+      };
+    });
 
   return {
     date,
     label: dayLabel.format(new Date(`${date}T00:00:00`)),
+    previousDate: shiftDate(date, -1),
+    nextDate: shiftDate(date, 1),
     summary: {
       reservations: forTheDay.length,
       covers: forTheDay.reduce((n, r) => n + r.partySize, 0),
       depositsRequired: forTheDay.filter((r) => r.deposit.required).length,
+      noShows: forTheDay.filter((r) => r.status === "no_show").length,
     },
     reservations: forTheDay,
   };
+}
+
+/** The date `days` away from `date`, as YYYY-MM-DD. */
+function shiftDate(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return toIsoDate(d);
 }
 
 /** A date as YYYY-MM-DD in the restaurant's own timezone, not UTC. */

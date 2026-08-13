@@ -1,5 +1,12 @@
 import { Router } from "express";
-import { listReservations } from "../data/book.js";
+import {
+  findGuest,
+  findReservation,
+  guestsById,
+  listReservations,
+  recordNoShow,
+} from "../data/book.js";
+import { checkNoShow, noShowFrom } from "../domain/no-show.js";
 import { buildDayBook, today } from "../domain/reservations.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,5 +33,43 @@ reservationsRouter.get("/reservations", (req, res) => {
     return;
   }
 
-  res.json(buildDayBook(listReservations(), requested ?? today()));
+  const date = requested ?? today();
+  res.json(buildDayBook(listReservations(), guestsById(), date, new Date()));
+});
+
+/**
+ * POST /reservations/:id/no-show
+ *
+ * Records that the guest never arrived. The no-show is filed against the
+ * guest, so it counts towards the deposit rule on every booking in their name,
+ * not only this one.
+ *
+ * Answers with the whole day's book rather than the single line. Marking a
+ * no-show can change another row on the same screen — a guest crossing the
+ * deposit threshold — so returning the rebuilt book keeps the screen
+ * consistent in one round trip and keeps it out of the business of working out
+ * what else the change touched.
+ */
+reservationsRouter.post("/reservations/:id/no-show", (req, res) => {
+  const reservation = findReservation(req.params.id);
+  if (reservation === undefined) {
+    res.status(404).json({ error: `No reservation ${req.params.id}.` });
+    return;
+  }
+
+  const guest = findGuest(reservation.guestId);
+  if (guest === undefined) {
+    res.status(500).json({ error: `Reservation ${reservation.id} has no guest on file.` });
+    return;
+  }
+
+  const verdict = checkNoShow(reservation, new Date());
+  if (!verdict.ok) {
+    res.status(409).json({ error: verdict.message, reason: verdict.reason });
+    return;
+  }
+
+  recordNoShow(reservation, guest, noShowFrom(reservation));
+
+  res.json(buildDayBook(listReservations(), guestsById(), reservation.date, new Date()));
 });
