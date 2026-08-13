@@ -29,8 +29,14 @@ export type Guest = {
   noShows: NoShow[];
 };
 
-/** Whether the guest turned up. */
-export type ReservationStatus = "booked" | "no_show";
+/**
+ * What became of a booking.
+ *
+ * `cancelled` is called off in advance — by either side — and is not a mark
+ * against the guest: a table given back is the opposite of a table left empty,
+ * and only `no_show` counts towards the deposit rule.
+ */
+export type ReservationStatus = "booked" | "no_show" | "cancelled";
 
 export type Reservation = {
   id: string;
@@ -51,8 +57,22 @@ export type Reservation = {
    * figure never carries a currency's presentation with it. It is a record of
    * what happened at booking, not a re-derivation: the rule's answer moves as
    * the counting window turns over, and a sum already taken does not.
+   *
+   * Cancelling leaves this alone. It records what was collected when the
+   * booking was taken, which cancelling does not undo; whether any of it goes
+   * back to the guest is a separate question, and not one this book answers.
    */
   depositTakenMinor: number | null;
+  /**
+   * Why the booking was called off, as whoever cancelled it put it — or `null`
+   * for a cancellation with nothing said, and for a booking still standing.
+   *
+   * `status` is what distinguishes those two: a reason is only ever read off a
+   * reservation that is `cancelled`. Kept as free text because the point of it
+   * is to tell a guest cancelling from the restaurant cancelling, and that
+   * doesn't reduce to a list of codes without losing exactly what was meant.
+   */
+  cancellationReason: string | null;
 };
 
 /**
@@ -74,6 +94,8 @@ export type BookedReservation = {
   guest: { id: string; name: string };
   deposit: Deposit;
   status: ReservationStatus;
+  /** Why it was called off, when it was. `null` if nothing was given. */
+  cancellationReason: string | null;
   /**
    * Whether a no-show may be recorded against this line right now — decided
    * here, so the screen never works out for itself whether a sitting has
@@ -81,6 +103,8 @@ export type BookedReservation = {
    * clock moves on after the book is fetched, and the write path checks again.
    */
   canMarkNoShow: boolean;
+  /** Whether this line can still be called off — the same kind of hint. */
+  canCancel: boolean;
 };
 
 export type DayBook = {
@@ -102,12 +126,19 @@ export type DayBook = {
   /**
    * Counts of what the book below actually holds. Narrowed to a table, these
    * are that table's numbers, so the totals never describe more than is shown.
+   *
+   * `covers` counts every line, cancelled ones included: it says what the day
+   * was booked at, the same way a no-show still counts towards it. `noShows`
+   * and `cancellations` are what make the difference legible — a service
+   * forecast that discounts the tables given back would be a different number,
+   * and worth being asked for by that name.
    */
   summary: {
     reservations: number;
     covers: number;
     depositsRequired: number;
     noShows: number;
+    cancellations: number;
   };
   reservations: BookedReservation[];
 };
@@ -308,7 +339,9 @@ export function buildDayBook(
         guest: { id: guest.id, name: guest.name },
         deposit: assessDeposit(guest, r.partySize, date),
         status: r.status,
+        cancellationReason: r.cancellationReason,
         canMarkNoShow: r.status === "booked" && sittingTime(r) <= now,
+        canCancel: r.status === "booked",
       };
     });
 
@@ -324,6 +357,7 @@ export function buildDayBook(
       covers: forTheDay.reduce((n, r) => n + r.partySize, 0),
       depositsRequired: forTheDay.filter((r) => r.deposit.required).length,
       noShows: forTheDay.filter((r) => r.status === "no_show").length,
+      cancellations: forTheDay.filter((r) => r.status === "cancelled").length,
     },
     reservations: forTheDay,
   };

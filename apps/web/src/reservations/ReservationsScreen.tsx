@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchDayBook, markNoShow, type BookedReservation, type DayBook } from "./api.js";
+import {
+  cancelReservation,
+  fetchDayBook,
+  markNoShow,
+  REASON_MAX_LENGTH,
+  type BookedReservation,
+  type DayBook,
+} from "./api.js";
 
 /**
  * The reservations screen — the day's book.
@@ -71,7 +78,31 @@ const styles = {
     background: "#fff",
     cursor: "pointer",
   },
+  input: {
+    font: "inherit",
+    fontSize: "0.8125rem",
+    padding: "0.3rem 0.5rem",
+    borderRadius: "0.375rem",
+    border: "1px solid #d0d0d0",
+    width: "100%",
+    minWidth: "11rem",
+    boxSizing: "border-box" as const,
+  },
+  note: { color: "#666", fontSize: "0.8125rem", marginTop: "0.15rem" },
 } satisfies Record<string, React.CSSProperties>;
+
+/** The pill both finished states are shown as, told apart by weight of colour. */
+function badge(background: string): React.CSSProperties {
+  return {
+    display: "inline-block",
+    padding: "0.125rem 0.5rem",
+    borderRadius: "999px",
+    background,
+    color: "#fff",
+    fontSize: "0.75rem",
+    fontWeight: 600,
+  };
+}
 
 /** The value standing for "no filter" — `<option>` values can only be strings. */
 const ALL_TABLES = "";
@@ -152,68 +183,148 @@ function DepositFlag({ deposit }: { deposit: BookedReservation["deposit"] }): Re
 }
 
 /**
- * The no-show control for one line.
+ * What became of one line, and what can still be done to it.
  *
- * Whether it can be pressed is the API's answer (`canMarkNoShow`), never a
- * comparison the screen makes against its own clock.
+ * Whether either control can be pressed is the API's answer — `canMarkNoShow`
+ * and `canCancel` — never a comparison the screen makes against its own clock
+ * or its own reading of the status. Both endpoints weigh the same rules again
+ * on the way in; these flags only decide what is worth offering.
+ *
+ * A cancelled line shows the reason it was given underneath, as it was typed.
  */
-function NoShowCell({
+function ArrivalCell({
   reservation,
   busy,
+  cancelReason,
   onMark,
+  onOpenCancel,
+  onChangeReason,
+  onConfirmCancel,
+  onDismissCancel,
 }: {
   reservation: BookedReservation;
   busy: boolean;
+  /** The reason being typed, or `null` when the box isn't open on this line. */
+  cancelReason: string | null;
   onMark: () => void;
+  onOpenCancel: () => void;
+  onChangeReason: (reason: string) => void;
+  onConfirmCancel: () => void;
+  onDismissCancel: () => void;
 }): React.JSX.Element {
   if (reservation.status === "no_show") {
+    return <span style={badge("#3a3a3a")}>No-show</span>;
+  }
+
+  if (reservation.status === "cancelled") {
     return (
-      <span
-        style={{
-          display: "inline-block",
-          padding: "0.125rem 0.5rem",
-          borderRadius: "999px",
-          background: "#3a3a3a",
-          color: "#fff",
-          fontSize: "0.75rem",
-          fontWeight: 600,
-        }}
-      >
-        No-show
-      </span>
+      <div>
+        <span style={badge("#6b6b6b")}>Cancelled</span>
+        {reservation.cancellationReason !== null && (
+          <div style={styles.note}>{reservation.cancellationReason}</div>
+        )}
+      </div>
+    );
+  }
+
+  if (cancelReason !== null) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+        <input
+          autoFocus
+          value={cancelReason}
+          maxLength={REASON_MAX_LENGTH}
+          placeholder="Reason (optional)"
+          aria-label={`Why ${reservation.guest.name}'s table is being called off`}
+          onChange={(e) => onChangeReason(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onConfirmCancel();
+            if (e.key === "Escape") onDismissCancel();
+          }}
+          style={styles.input}
+        />
+        <div style={{ display: "flex", gap: "0.4rem" }}>
+          {/* Named for what it does, not for the word on the control that
+              opened it — "Cancel" next to "Back" is a coin toss. */}
+          <button
+            type="button"
+            onClick={onConfirmCancel}
+            disabled={busy}
+            style={{ ...styles.step, fontSize: "0.8125rem" }}
+          >
+            {busy ? "Cancelling…" : "Cancel booking"}
+          </button>
+          <button
+            type="button"
+            onClick={onDismissCancel}
+            disabled={busy}
+            style={{ ...styles.step, fontSize: "0.8125rem", color: "#666" }}
+          >
+            Back
+          </button>
+        </div>
+      </div>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={onMark}
-      disabled={!reservation.canMarkNoShow || busy}
-      title={
-        reservation.canMarkNoShow
-          ? `Record ${reservation.guest.name} as a no-show`
-          : "The sitting hasn't passed yet"
-      }
-      style={{
-        ...styles.step,
-        cursor: reservation.canMarkNoShow && !busy ? "pointer" : "not-allowed",
-        color: reservation.canMarkNoShow ? "#1a1a1a" : "#aaa",
-        fontSize: "0.8125rem",
-      }}
-    >
-      {busy ? "Recording…" : "Mark no-show"}
-    </button>
+    <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+      <button
+        type="button"
+        onClick={onMark}
+        disabled={!reservation.canMarkNoShow || busy}
+        title={
+          reservation.canMarkNoShow
+            ? `Record ${reservation.guest.name} as a no-show`
+            : "The sitting hasn't passed yet"
+        }
+        style={{
+          ...styles.step,
+          cursor: reservation.canMarkNoShow && !busy ? "pointer" : "not-allowed",
+          color: reservation.canMarkNoShow ? "#1a1a1a" : "#aaa",
+          fontSize: "0.8125rem",
+        }}
+      >
+        {busy ? "Recording…" : "Mark no-show"}
+      </button>
+      <button
+        type="button"
+        onClick={onOpenCancel}
+        disabled={!reservation.canCancel || busy}
+        title={`Call off ${reservation.guest.name}'s table`}
+        style={{
+          ...styles.step,
+          cursor: reservation.canCancel && !busy ? "pointer" : "not-allowed",
+          color: reservation.canCancel ? "#1a1a1a" : "#aaa",
+          fontSize: "0.8125rem",
+        }}
+      >
+        Cancel
+      </button>
+    </div>
   );
 }
 
 function Book({
   book,
-  marking,
+  busy,
+  cancelling,
   onMark,
+  onOpenCancel,
+  onChangeReason,
+  onConfirmCancel,
+  onDismissCancel,
 }: {
   book: DayBook;
-  marking: string | null;
+  /** The line with a write in flight, if any. */
+  busy: string | null;
+  /** The line whose cancellation box is open, and what has been typed in it. */
+  cancelling: { id: string; reason: string } | null;
   onMark: (id: string) => void;
+  onOpenCancel: (id: string) => void;
+  onChangeReason: (reason: string) => void;
+  onConfirmCancel: () => void;
+  onDismissCancel: () => void;
 }): React.JSX.Element {
   if (book.reservations.length === 0) {
     return (
@@ -250,7 +361,7 @@ function Book({
         </thead>
         <tbody>
           {book.reservations.map((r) => (
-            <tr key={r.id} style={r.status === "no_show" ? { background: "#fafafa" } : undefined}>
+            <tr key={r.id} style={r.status === "booked" ? undefined : { background: "#fafafa" }}>
               <td style={{ ...styles.td, fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
                 {r.time}
               </td>
@@ -261,10 +372,15 @@ function Book({
                 <DepositFlag deposit={r.deposit} />
               </td>
               <td style={styles.td}>
-                <NoShowCell
+                <ArrivalCell
                   reservation={r}
-                  busy={marking === r.id}
+                  busy={busy === r.id}
+                  cancelReason={cancelling?.id === r.id ? cancelling.reason : null}
                   onMark={() => onMark(r.id)}
+                  onOpenCancel={() => onOpenCancel(r.id)}
+                  onChangeReason={onChangeReason}
+                  onConfirmCancel={onConfirmCancel}
+                  onDismissCancel={onDismissCancel}
                 />
               </td>
             </tr>
@@ -283,12 +399,18 @@ export function ReservationsScreen(): React.JSX.Element {
   const [table, setTable] = useState<string | null>(null);
   const [book, setBook] = useState<DayBook | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [marking, setMarking] = useState<string | null>(null);
+  /** The line with a write in flight — either kind, only ever one at a time. */
+  const [busy, setBusy] = useState<string | null>(null);
+  /** The line being called off, and the reason as it's being typed. */
+  const [cancelling, setCancelling] = useState<{ id: string; reason: string } | null>(null);
 
   useEffect(() => {
     let live = true;
     setBook(null);
     setError(null);
+    // These rows are on their way out; a box open on one of them isn't about
+    // any line in the book that replaces them.
+    setCancelling(null);
 
     fetchDayBook(date, table)
       .then((loaded) => live && setBook(loaded))
@@ -303,7 +425,7 @@ export function ReservationsScreen(): React.JSX.Element {
 
   const onMark = useCallback(
     (id: string) => {
-      setMarking(id);
+      setBusy(id);
       setError(null);
 
       // The filter goes with it, so what comes back is the book being read.
@@ -312,10 +434,31 @@ export function ReservationsScreen(): React.JSX.Element {
         // the deposit threshold shows it on their other bookings straight away.
         .then(setBook)
         .catch((cause: unknown) => setError(messageFor(cause, "The no-show couldn't be recorded.")))
-        .finally(() => setMarking(null));
+        .finally(() => setBusy(null));
     },
     [table]
   );
+
+  const onConfirmCancel = useCallback(() => {
+    if (cancelling === null) return;
+    const { id, reason } = cancelling;
+
+    setBusy(id);
+    setError(null);
+
+    // An empty box is a cancellation with nothing said, not an empty reason.
+    cancelReservation(id, reason.trim() === "" ? null : reason, table)
+      .then((rebuilt) => {
+        setBook(rebuilt);
+        setCancelling(null);
+      })
+      .catch((cause: unknown) =>
+        // The box stays open, holding what was typed, so a refusal doesn't cost
+        // whoever is working the book the words they had already found.
+        setError(messageFor(cause, "The cancellation couldn't be recorded."))
+      )
+      .finally(() => setBusy(null));
+  }, [cancelling, table]);
 
   return (
     <main style={styles.page}>
@@ -341,6 +484,7 @@ export function ReservationsScreen(): React.JSX.Element {
           <span style={styles.muted}>
             {book.label} · {book.summary.reservations} reservations · {book.summary.covers} covers
             {book.summary.noShows > 0 && ` · ${book.summary.noShows} no-shows`}
+            {book.summary.cancellations > 0 && ` · ${book.summary.cancellations} cancelled`}
             {book.table !== null && ` · table ${book.table} only`}
           </span>
         </div>
@@ -353,7 +497,18 @@ export function ReservationsScreen(): React.JSX.Element {
           <p style={styles.muted}>Loading the book…</p>
         ) : null
       ) : (
-        <Book book={book} marking={marking} onMark={onMark} />
+        <Book
+          book={book}
+          busy={busy}
+          cancelling={cancelling}
+          onMark={onMark}
+          onOpenCancel={(id) => setCancelling({ id, reason: "" })}
+          onChangeReason={(reason) =>
+            setCancelling((open) => (open === null ? null : { ...open, reason }))
+          }
+          onConfirmCancel={onConfirmCancel}
+          onDismissCancel={() => setCancelling(null)}
+        />
       )}
     </main>
   );

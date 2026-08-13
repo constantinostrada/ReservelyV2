@@ -102,18 +102,23 @@ const guests: Guest[] = [
 // rule was enforced at booking, so nothing was collected on any of them.
 const reservations: Reservation[] = [
   // Yesterday — every sitting has passed, so all of it can be marked.
-  { id: "res_y1", date: yesterday, time: "12:30", table: "5", partySize: 2, guestId: "gst_07", status: "booked", depositTakenMinor: null },
-  { id: "res_y2", date: yesterday, time: "19:30", table: "8", partySize: 4, guestId: "gst_06", status: "booked", depositTakenMinor: null },
-  { id: "res_y3", date: yesterday, time: "20:00", table: "11", partySize: 6, guestId: "gst_03", status: "booked", depositTakenMinor: null },
+  { id: "res_y1", date: yesterday, time: "12:30", table: "5", partySize: 2, guestId: "gst_07", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_y2", date: yesterday, time: "19:30", table: "8", partySize: 4, guestId: "gst_06", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_y3", date: yesterday, time: "20:00", table: "11", partySize: 6, guestId: "gst_03", status: "booked", depositTakenMinor: null, cancellationReason: null },
 
   // Today — lunch has passed by any normal afternoon, dinner has not.
-  { id: "res_01", date: service, time: "12:30", table: "5", partySize: 2, guestId: "gst_01", status: "booked", depositTakenMinor: null },
-  { id: "res_02", date: service, time: "13:00", table: "6", partySize: 3, guestId: "gst_03", status: "booked", depositTakenMinor: null },
-  { id: "res_03", date: service, time: "18:30", table: "12", partySize: 4, guestId: "gst_02", status: "booked", depositTakenMinor: null },
-  { id: "res_04", date: service, time: "19:00", table: "7", partySize: 6, guestId: "gst_04", status: "booked", depositTakenMinor: null },
-  { id: "res_05", date: service, time: "19:45", table: "9", partySize: 8, guestId: "gst_05", status: "booked", depositTakenMinor: null },
-  { id: "res_06", date: service, time: "20:15", table: "3", partySize: 3, guestId: "gst_06", status: "booked", depositTakenMinor: null },
-  { id: "res_07", date: service, time: "21:00", table: "12", partySize: 5, guestId: "gst_07", status: "booked", depositTakenMinor: null },
+  { id: "res_01", date: service, time: "12:30", table: "5", partySize: 2, guestId: "gst_01", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_02", date: service, time: "13:00", table: "6", partySize: 3, guestId: "gst_03", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_03", date: service, time: "18:30", table: "12", partySize: 4, guestId: "gst_02", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_04", date: service, time: "19:00", table: "7", partySize: 6, guestId: "gst_04", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_05", date: service, time: "19:45", table: "9", partySize: 8, guestId: "gst_05", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_06", date: service, time: "20:15", table: "3", partySize: 3, guestId: "gst_06", status: "booked", depositTakenMinor: null, cancellationReason: null },
+  { id: "res_07", date: service, time: "21:00", table: "12", partySize: 5, guestId: "gst_07", status: "booked", depositTakenMinor: null, cancellationReason: null },
+
+  // One already called off, so the day shows what a cancellation reads like
+  // next to the bookings still standing — and by whom, which is the whole
+  // reason the book keeps the words rather than just the fact.
+  { id: "res_08", date: service, time: "20:30", table: "8", partySize: 4, guestId: "gst_04", status: "cancelled", depositTakenMinor: null, cancellationReason: "Guest called ahead — one of the party is unwell" },
 ];
 
 /** Ids for bookings taken while the service is running, after the seed's. */
@@ -151,4 +156,17 @@ export function addReservation(booking: Omit<Reservation, "id">): Reservation {
 export function recordNoShow(reservation: Reservation, guest: Guest, noShow: NoShow): void {
   reservation.status = "no_show";
   guest.noShows.push(noShow);
+}
+
+/**
+ * Calls a booking off, with whatever was said about it — `null` when nothing
+ * was.
+ *
+ * Nothing is written to the guest. A cancellation is an event in the day's
+ * book, not a mark the guest carries into their next booking, which is the
+ * whole difference between this and a no-show.
+ */
+export function recordCancellation(reservation: Reservation, reason: string | null): void {
+  reservation.status = "cancelled";
+  reservation.cancellationReason = reason;
 }

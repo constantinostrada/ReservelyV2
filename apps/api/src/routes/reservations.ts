@@ -5,12 +5,15 @@ import {
   findReservation,
   guestsById,
   listReservations,
+  recordCancellation,
   recordNoShow,
 } from "../data/book.js";
 import { checkDeposit, confirmDeposit } from "../domain/booking.js";
+import { checkCancellation } from "../domain/cancellation.js";
 import { checkNoShow, noShowFrom } from "../domain/no-show.js";
 import { buildDayBook, depositRequirement, today } from "../domain/reservations.js";
 import { parseBookingRequest } from "./booking-request.js";
+import { parseCancellation } from "./cancellation-request.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -122,6 +125,7 @@ reservationsRouter.post("/reservations", (req, res) => {
     guestId,
     status: "booked",
     depositTakenMinor: verdict.taken?.deposit.amountMinor ?? null,
+    cancellationReason: null,
   });
 
   res.status(201).json({
@@ -174,6 +178,61 @@ reservationsRouter.post("/reservations/:id/no-show", (req, res) => {
   }
 
   recordNoShow(reservation, guest, noShowFrom(reservation));
+
+  res.json(
+    buildDayBook(listReservations(), guestsById(), reservation.date, new Date(), filter.table)
+  );
+});
+
+/**
+ * POST /reservations/:id/cancel
+ *
+ * Calls a booking off, with an optional note on why:
+ *
+ *     { "reason": "Guest called ahead — one of the party is unwell" }
+ *
+ * The body may be left off entirely, which is the ordinary case: a
+ * cancellation with nothing said is a cancellation, not a bad request.
+ *
+ * The reason is free text and is stored as given. Its point is to tell a guest
+ * cancelling from the restaurant cancelling, and the book can't know in advance
+ * which distinctions will matter — so it keeps the words rather than sorting
+ * them into codes it would have had to guess at.
+ *
+ * Nothing is written to the guest's history: a table given back is not a table
+ * left empty, and only no-shows bear on the deposit rule. Nor is the deposit
+ * touched — `depositTakenMinor` records what was collected at booking, and
+ * whether any of it goes back is a question for whoever holds the till.
+ *
+ * Answers with the day's book, filtered as `?table=` asks, for the same reason
+ * marking a no-show does.
+ */
+reservationsRouter.post("/reservations/:id/cancel", (req, res) => {
+  const filter = tableFilter(req.query.table);
+  if (!filter.ok) {
+    res.status(400).json({ error: filter.message });
+    return;
+  }
+
+  const parsed = parseCancellation(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.message });
+    return;
+  }
+
+  const reservation = findReservation(req.params.id);
+  if (reservation === undefined) {
+    res.status(404).json({ error: `No reservation ${req.params.id}.` });
+    return;
+  }
+
+  const verdict = checkCancellation(reservation);
+  if (!verdict.ok) {
+    res.status(409).json({ error: verdict.message, reason: verdict.reason });
+    return;
+  }
+
+  recordCancellation(reservation, parsed.reason);
 
   res.json(
     buildDayBook(listReservations(), guestsById(), reservation.date, new Date(), filter.table)

@@ -11,7 +11,7 @@ import { sittingTime, type NoShow, type Reservation } from "./reservations.js";
 export type NoShowRefusal = {
   ok: false;
   /** Machine-readable so callers can branch without matching on prose. */
-  reason: "not_yet_sat" | "already_marked";
+  reason: "not_yet_sat" | "already_marked" | "cancelled";
   message: string;
 };
 
@@ -31,6 +31,17 @@ export function checkNoShow(reservation: Reservation, now: Date): NoShowCheck {
       ok: false,
       reason: "already_marked",
       message: "This reservation is already recorded as a no-show.",
+    };
+  }
+
+  if (reservation.status === "cancelled") {
+    // The table was given back before service. Nobody failed to turn up for a
+    // sitting that was called off, and a no-show follows the guest around —
+    // so this door stays shut regardless of how long ago the time passed.
+    return {
+      ok: false,
+      reason: "cancelled",
+      message: "This reservation was cancelled, so it can't be recorded as a no-show.",
     };
   }
 

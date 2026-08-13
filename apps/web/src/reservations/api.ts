@@ -14,7 +14,7 @@ export type Deposit =
   | { required: false }
   | { required: true; amount: string; reason: string };
 
-export type ReservationStatus = "booked" | "no_show";
+export type ReservationStatus = "booked" | "no_show" | "cancelled";
 
 export type BookedReservation = {
   id: string;
@@ -24,9 +24,23 @@ export type BookedReservation = {
   guest: { id: string; name: string };
   deposit: Deposit;
   status: ReservationStatus;
+  /** Why it was called off, as it was given. `null` if nothing was said. */
+  cancellationReason: string | null;
   /** Whether the API will accept a no-show against this line. Its call, not ours. */
   canMarkNoShow: boolean;
+  /** Whether the API will accept a cancellation. Also its call. */
+  canCancel: boolean;
 };
+
+/**
+ * The longest reason the API will take, mirrored from `REASON_MAX_LENGTH` in
+ * `apps/api/src/routes/cancellation-request.ts` — by hand, like the types
+ * above, and for the same want of a shared package.
+ *
+ * It stops the box overrunning as it's typed. It is not the rule: the API
+ * measures what it is sent and refuses anything longer on its own account.
+ */
+export const REASON_MAX_LENGTH = 200;
 
 export type DayBook = {
   date: string;
@@ -49,6 +63,7 @@ export type DayBook = {
     covers: number;
     depositsRequired: number;
     noShows: number;
+    cancellations: number;
   };
   reservations: BookedReservation[];
 };
@@ -114,6 +129,33 @@ export async function markNoShow(
   );
 
   if (!response.ok) throw await errorFrom(response, "The no-show couldn't be recorded");
+
+  return (await response.json()) as DayBook;
+}
+
+/**
+ * Calls a booking off, with an optional note on why — `null` for none, which
+ * is the ordinary case and sends no reason at all rather than an empty one.
+ *
+ * Answers with the day's book, filtered as the screen is reading it, the same
+ * way marking a no-show does.
+ */
+export async function cancelReservation(
+  reservationId: string,
+  reason: string | null = null,
+  table: string | null = null
+): Promise<DayBook> {
+  const query = bookQuery(null, table);
+  const response = await fetch(
+    `/api/reservations/${encodeURIComponent(reservationId)}/cancel${query}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(reason === null ? {} : { reason }),
+    }
+  );
+
+  if (!response.ok) throw await errorFrom(response, "The cancellation couldn't be recorded");
 
   return (await response.json()) as DayBook;
 }

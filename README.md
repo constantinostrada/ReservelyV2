@@ -145,8 +145,48 @@ The screen never makes that judgement itself. Each line carries a
 the flag is only a hint for rendering, since the clock moves on after the book
 is fetched, and the write path checks again before accepting.
 
+## Cancellations
+
+`POST /reservations/:id/cancel` calls a booking off. The body is optional, and
+so is the reason in it:
+
+    { "reason": "Guest called ahead — one of the party is unwell" }
+
+Free text, 200 characters at most, trimmed and stored as given; a blank one is
+kept as no reason rather than refused. The point of the field is to tell a
+guest cancelling from the restaurant cancelling, and the book can't know in
+advance which distinctions will matter, so it keeps the words instead of
+sorting them into codes someone would have had to guess at. It comes back on
+the line as `cancellationReason`, `null` when nothing was said.
+
+A cancellation is **not** a mark against the guest. Nothing is written to their
+history and it has no bearing on the deposit rule — a table given back is the
+opposite of a table left empty. That is also why the two can't be swapped: a
+no-show can't be cancelled (`409 already_no_show`), and a cancelled booking
+can't be marked a no-show (`409 cancelled`), which the write path checks for
+itself rather than trusting the `canCancel` and `canMarkNoShow` hints it sends.
+
+Unlike a no-show there is no time rule: a table can be given back before
+service or halfway through it, and the restaurant calling one off mid-service
+is exactly the case worth recording.
+
+The deposit is left alone. `depositTakenMinor` records what was collected when
+the booking was taken, which cancelling doesn't undo; whether any of it goes
+back to the guest is a question for whoever holds the till, and not one this
+book answers yet.
+
+`summary.cancellations` counts them, and `covers` still counts every line —
+what the day was booked at, the same way a no-show still counts towards it. A
+forecast that discounted the tables given back would be a different number, and
+worth asking for by that name.
+
 ## Still open
 
 Where reservations and guests are actually stored (`data/book.ts` is a stand-in
 seeded against today and yesterday), how bookings are made rather than just
-read, and undoing a no-show recorded by mistake.
+read, and undoing a no-show recorded by mistake — or a cancellation, which has
+the same one-way problem.
+
+What becomes of a deposit on a cancelled booking is open too: the sum stays on
+the record and nothing moves, which is the honest thing to do until there is a
+refund policy to follow.
